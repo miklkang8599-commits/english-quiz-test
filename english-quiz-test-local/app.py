@@ -1,7 +1,7 @@
 # ==============================================================================
-# 🧩 英文全能練習系統 (V2.8.87 - 題目講解多選學生版)
+# 🧩 英文全能練習系統 (V2.8.91 - 講解文字說明版)
 # ==============================================================================
-# 📌 版本編號 (VERSION): 2.8.87
+# 📌 版本編號 (VERSION): 2.8.91
 # 📅 更新日期: 2026-03-14
 # 🛠️ 修復重點：
 #    1. [核心] set_page_config 移至最頂部，避免潛在初始化錯誤。
@@ -22,7 +22,7 @@ import re
 from datetime import datetime, timedelta
 from streamlit_gsheets import GSheetsConnection
 
-VERSION = "2.8.87"
+VERSION = "2.8.91"
 
 # ==============================================================================
 # ✅ 修復 1：set_page_config 必須是第一個 Streamlit 呼叫
@@ -286,8 +286,36 @@ if st.session_state.group_id == "ADMIN" and st.session_state.view_mode == "管�
                     q_logs_all = pd.DataFrame()
                     attempted, correct, reviewed = 0, 0, 0
 
-                reviewed_tag = " 📖" if reviewed > 0 else ""
-                label = f"句 {qrow['句編號']}｜{q_title[:28]}{'…' if len(q_title)>28 else ''}　✅{correct}/{attempted}{reviewed_tag}"
+                # 每位學生最新一筆結果（姓名：文字說明+個人講解標記）
+                stu_tags = []
+                for stu in target_students:
+                    if not q_logs_all.empty:
+                        stu_ans_rows = q_logs_all[
+                            (q_logs_all['姓名'] == stu) &
+                            (~q_logs_all['結果'].str.contains('📖', na=False))
+                        ]
+                        stu_rev_rows = q_logs_all[
+                            (q_logs_all['姓名'] == stu) &
+                            (q_logs_all['結果'] == '📖 講解')
+                        ]
+                    else:
+                        stu_ans_rows = pd.DataFrame()
+                        stu_rev_rows = pd.DataFrame()
+
+                    if stu_ans_rows.empty:
+                        status = "未作答"
+                    elif stu_ans_rows.iloc[0]['結果'] == "✅":
+                        status = "正確✅"
+                    else:
+                        status = "錯誤❌"
+                    rev = "📖" if not stu_rev_rows.empty else ""
+                    stu_tags.append(f"{stu}：{status}{rev}")
+
+                stu_tag_str = "　|　".join(stu_tags)
+                label = (
+                    f"句 {qrow['句編號']}｜{q_title[:16]}{'…' if len(q_title)>16 else ''}"
+                    f"　　{stu_tag_str}"
+                )
 
                 with st.expander(label):
 
