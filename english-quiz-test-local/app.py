@@ -1,7 +1,7 @@
 # ==============================================================================
-# 🧩 英文全能練習系統 (V2.8.94 - 數據監控全篩選版)
+# 🧩 英文全能練習系統 (V2.8.95 - 排行榜三期間版)
 # ==============================================================================
-# 📌 版本編號 (VERSION): 2.8.94
+# 📌 版本編號 (VERSION): 2.8.95
 # 📅 更新日期: 2026-03-14
 # 🛠️ 修復重點：
 #    1. [核心] set_page_config 移至最頂部，避免潛在初始化錯誤。
@@ -22,7 +22,7 @@ import re
 from datetime import datetime, timedelta
 from streamlit_gsheets import GSheetsConnection
 
-VERSION = "2.8.94"
+VERSION = "2.8.95"
 
 # ==============================================================================
 # ✅ 修復 1：set_page_config 必須是第一個 Streamlit 呼叫
@@ -160,16 +160,40 @@ with st.sidebar:
         st.rerun()
 
     st.divider()
-    st.markdown("🏆 **今日成就排行**")
+    st.markdown("🏆 **成就排行**")
     if not df_l.empty and '時間' in df_l.columns:
-        today_str = get_now().strftime("%Y-%m-%d")
-        gl = df_l[
-            (df_l['分組'] == st.session_state.group_id) &
-            (df_l['時間'].str.startswith(today_str))
-        ].copy()
-        for m in sorted(df_s[df_s['分組'] == st.session_state.group_id]['姓名'].tolist()):
-            c_cnt = len(gl[(gl['姓名'] == m) & (gl['結果'] == '✅')])
-            st.markdown(f'<div style="font-size:12px;">👤 {m}: {c_cnt} 題</div>', unsafe_allow_html=True)
+        now_sb   = get_now()
+        period   = st.radio("統計區間", ["今日", "本週", "本月"], horizontal=True, key="sb_period", label_visibility="collapsed")
+        if period == "今日":
+            prefix = now_sb.strftime("%Y-%m-%d")
+        elif period == "本週":
+            week_start = (now_sb - timedelta(days=now_sb.weekday())).strftime("%Y-%m-%d")
+            prefix = None
+        else:
+            prefix = now_sb.strftime("%Y-%m")
+
+        # 判斷群組：ADMIN 看全部，學生看自己群組
+        target_group = st.session_state.group_id if st.session_state.group_id != "ADMIN" else None
+        df_lb = df_l.copy()
+        if target_group:
+            df_lb = df_lb[df_lb['分組'] == target_group]
+
+        if period == "本週":
+            df_lb = df_lb[df_lb['時間'] >= week_start]
+        else:
+            df_lb = df_lb[df_lb['時間'].str.startswith(prefix)]
+
+        df_lb = df_lb[df_lb['結果'] == '✅']
+
+        # 取學生名單
+        if target_group:
+            members = sorted(df_s[df_s['分組'] == target_group]['姓名'].tolist())
+        else:
+            members = sorted(df_s[df_s['分組'] != 'ADMIN']['姓名'].tolist())
+
+        for m in members:
+            cnt = len(df_lb[df_lb['姓名'] == m])
+            st.markdown(f'<div style="font-size:12px;">👤 {m}: {cnt} 題</div>', unsafe_allow_html=True)
     st.write("")
     st.caption(f"Ver {VERSION}")
 
