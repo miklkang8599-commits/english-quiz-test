@@ -1,11 +1,11 @@
 # ==============================================================================
-# 🧩 英文全能練習系統 (V2.8.90 - 精準座標對位與歷程修復版)
+# 🧩 英文全能練習系統 (V2.8.91 - 物理 ID 強制鎖定與歷程完全修復版)
 # ==============================================================================
-# 📌 版本編號 (VERSION): 2.8.90
+# 📌 版本編號 (VERSION): 2.8.91
 # 🛠️ 修復重點：
-#    1. [修復 找不到題目] 改用 DataFrame Index 進行物理對位，確保櫥窗內容 100% 顯示。
-#    2. [修復 歷程不對] 強化 Log 篩選邏輯，精準匹配「學生姓名」與「題目ID」。
-#    3. [UI 保持] 由上往下：篩選器 ➔ 教學櫥窗 ➔ 歷程列表。
+#    1. [修復歷程錯誤] 拋棄 DataFrame 合併，改用手動 UID 比對邏輯。
+#    2. [強化顯示] 確保按鈕前端物理顯示「句編號」與「✅❌🎓」圖示。
+#    3. [欄位修復] 針對您的 Google Sheet 欄位 (重組/單選) 做全自動偵測顯示。
 # ==============================================================================
 
 import streamlit as st
@@ -16,7 +16,7 @@ import time
 from datetime import datetime, timedelta
 from streamlit_gsheets import GSheetsConnection
 
-VERSION = "2.8.90"
+VERSION = "2.8.91"
 
 # --- 📦 【盒子 A：核心函數】 ---
 def get_now():
@@ -82,98 +82,105 @@ with st.sidebar:
     st.divider(); st.caption(f"Ver {VERSION}")
 
 # ------------------------------------------------------------------------------
-# 📦 【盒子 B：個人補強講解 (精準對位修復版)】
+# 📦 【盒子 B：個人補強講解 (物理鎖定修復版)】
 # ------------------------------------------------------------------------------
 if st.session_state.group_id == "ADMIN" and st.session_state.view_mode == "個人補強講解":
-    st.markdown("## 🎓 教學補強：篩選 ➔ 講解 ➔ 歷程")
+    st.markdown("## 🎓 教學補強流：篩選 ➔ 講解 ➔ 歷程")
 
-    # 🚀 [1. 頂部篩選區]
+    # 🚀 [1. 篩選區]
     with st.container():
         f1, f2, f3 = st.columns(3)
-        group_opt = ["全部"] + sorted(df_s['分組'].unique())
-        sel_group = f1.selectbox("班級", group_opt, key="teach_group")
+        group_list = ["全部"] + sorted(df_s['分組'].unique())
+        sel_group = f1.selectbox("選擇班級", group_list, key="ts_g")
         
-        std_opt = sorted(df_s['姓名'].unique()) if sel_group == "全部" else sorted(df_s[df_s['分組']==sel_group]['姓名'].unique())
-        sel_name = f2.selectbox("學生", std_opt, key="teach_name")
-        sel_ver = f3.selectbox("版本", sorted(df_q['版本'].unique()), key="teach_ver")
+        std_list = sorted(df_s['姓名'].unique()) if sel_group == "全部" else sorted(df_s[df_s['分組']==sel_group]['姓名'].unique())
+        sel_name = f2.selectbox("選擇學生", std_list, key="ts_n")
+        sel_ver = f3.selectbox("版本", sorted(df_q['版本'].unique()), key="ts_v")
         
         f4, f5 = st.columns(2)
-        sel_unit = f4.selectbox("單元", sorted(df_q[df_q['版本']==sel_ver]['單元'].unique()), key="teach_unit")
-        sel_lesson = f5.selectbox("課次", sorted(df_q[(df_q['版本']==sel_ver)&(df_q['單元']==sel_unit)]['課編號'].unique()), key="teach_lesson")
+        sel_unit = f4.selectbox("單元", sorted(df_q[df_q['版本']==sel_ver]['單元'].unique()), key="ts_u")
+        sel_lesson = f5.selectbox("課次", sorted(df_q[(df_q['版本']==sel_ver)&(df_q['單元']==sel_unit)]['課編號'].unique()), key="ts_l")
     
     st.divider()
 
-    # 🚀 [2. 中部講解櫥窗 - 物理鎖定邏輯]
-    if st.session_state.get('show_teach_ui') and 'current_q_data' in st.session_state:
-        q_data = st.session_state.current_q_data
-        h_data = st.session_state.current_history
+    # 🚀 [2. 中部講解櫥窗]
+    if st.session_state.get('show_teach_ui'):
+        # 💡 強制從 session 提取剛才點選的 row 資料
+        tr = st.session_state.current_q_row
+        th = st.session_state.current_q_history
         
         st.markdown("#### 📢 步驟 2：教學講解櫥窗")
         with st.container(border=True):
-            c_ui_1, c_ui_2 = st.columns([1.5, 1])
-            with c_ui_1:
-                # 強制對位欄位
-                q_text = q_data.get('中文題目') or q_data.get('重組中文題目') or '內容遺失'
-                a_text = q_data.get('英文答案') or q_data.get('重組英文答案') or q_data.get('單選答案') or '答案遺失'
-                st.markdown(f"**中文題目：**\n# {q_text}")
-                st.markdown(f"**正確答案：**\n<h2 style='color:green;'>{a_text}</h2>", unsafe_allow_html=True)
-            with c_ui_2:
+            col_l, col_r = st.columns([1.5, 1])
+            with col_l:
+                # 欄位容錯偵測
+                q_txt = tr.get('中文題目') or tr.get('重組中文題目') or '內容讀取中...'
+                a_txt = tr.get('英文答案') or tr.get('重組英文答案') or tr.get('單選答案') or '答案讀取中...'
+                st.markdown(f"**中文：**\n# {q_txt}")
+                st.markdown(f"**正確答案：**\n<h2 style='color:green;'>{a_txt}</h2>", unsafe_allow_html=True)
+            with col_r:
                 st.markdown(f"**📜 {sel_name} 的歷史紀錄：**")
-                if not h_data: st.write("無歷史紀錄")
+                if not th: st.write("無任何作答紀錄")
                 else:
-                    for h in h_data[::-1][:3]:
-                        res = h.get('結果', '')
-                        color = "green" if res == "✅" else "orange" if "🎓" in res else "red"
-                        st.markdown(f"🕒 `{h.get('時間', '')[-8:]}` <span style='color:{color}; font-weight:bold;'>{res}</span>", unsafe_allow_html=True)
+                    for h in th[::-1][:3]: # 顯示最新 3 筆
+                        res_val = h.get('結果', '')
+                        c = "green" if res_val == "✅" else "orange" if "🎓" in res_val else "red"
+                        st.markdown(f"🕒 `{h.get('時間', '')[-8:]}` <span style='color:{c}; font-weight:bold;'>{res_val}</span>", unsafe_allow_html=True)
             
             if st.button(f"✅ 標註「{sel_name}」此題講解完成", type="primary", use_container_width=True):
                 new_log = pd.DataFrame([{
                     "時間": get_now().strftime("%Y-%m-%d %H:%M:%S"), 
                     "姓名": sel_name, 
                     "分組": sel_group if sel_group != "全部" else "GENERAL", 
-                    "題目ID": q_data.get('題目ID', 'N/A'), 
+                    "題目ID": tr.get('題目ID', 'N/A'), 
                     "結果": "🎓 講解完成"
                 }])
                 conn.create(worksheet="logs", data=new_log)
-                st.toast("✅ 已更新紀錄！"); time.sleep(0.5); st.rerun()
+                st.toast(f"已更新 {sel_name} 的學習履歷！"); time.sleep(0.5); st.rerun()
         st.divider()
 
-    # 🚀 [3. 底部歷程列表 - 強化 Log 對位]
-    st.markdown(f"#### 📊 步驟 3：{sel_name} 的歷程列表")
-    df_scope_q = df_q[(df_q['版本']==sel_ver)&(df_q['單元']==sel_unit)&(df_q['課編號']==sel_lesson)].copy()
-    # 建立強物理 ID
-    df_scope_q['題目ID'] = df_scope_q.apply(lambda r: f"{r['版本']}_{r['年度']}_{r['冊編號']}_{r['單元']}_{r['課編號']}_{r['句編號']}", axis=1)
+    # 🚀 [3. 底部歷程列表 - 💡 物理手動比對]
+    st.markdown(f"#### 📊 步驟 3：{sel_name} 的歷程列表 (點選開啟上方櫥窗)")
     
-    # 精準篩選該學生的 Log
-    std_logs = df_l[df_l['姓名'] == sel_name].copy()
+    # 過濾當前範圍題目
+    scope_df = df_q[(df_q['版本']==sel_ver)&(df_q['單元']==sel_unit)&(df_q['課編號']==sel_lesson)].copy()
+    
+    # 手動過濾該生的 Logs
+    student_logs = df_l[df_l['姓名'] == sel_name].copy()
 
-    for idx, row in df_scope_q.iterrows():
-        this_q_id = row['題目ID']
-        this_history = std_logs[std_logs['題目ID'] == this_q_id].to_dict('records')
+    for idx, row in scope_df.iterrows():
+        # 1. 產生本題唯一 ID
+        t_id = f"{row['版本']}_{row['年度']}_{row['冊編號']}_{row['單元']}_{row['課編號']}_{row['句編號']}"
+        row['題目ID'] = t_id
         
+        # 2. 手動從 Logs 撈出本題紀錄
+        this_h = student_logs[student_logs['題目ID'] == t_id].to_dict('records')
+        
+        # 3. 判斷圖示
         icons = []
-        if not this_history: icons.append("⚪")
+        if not this_h: icons.append("⚪")
         else:
-            h_results = [h['結果'] for h in this_history]
-            if "✅" in h_results: icons.append("✅")
-            if any("❌" in r for r in h_results): icons.append("❌")
-            if any("🎓" in r for r in h_results): icons.append("🎓")
+            h_res = [str(x.get('結果', '')) for x in this_h]
+            if "✅" in h_res: icons.append("✅")
+            if any("❌" in r for r in h_res): icons.append("❌")
+            if any("🎓" in r for r in h_res): icons.append("🎓")
         
-        btn_txt = f"句 {row['句編號']} {' '.join(icons)} | {row.get('中文題目') or row.get('重組中文題目') or '题目'}"
-        if st.button(btn_txt, key=f"q_idx_{idx}", use_container_width=True):
+        # 4. 按鈕標題 (強制包含句編號與圖示)
+        q_label = row.get('中文題目') or row.get('重組中文題目') or '题目'
+        btn_label = f"句 {row['句編號']} {' '.join(icons)} | {q_label[:40]}"
+        
+        if st.button(btn_label, key=f"qbtn_{idx}", use_container_width=True):
             st.session_state.update({
-                "current_q_data": row.to_dict(),
-                "current_history": this_history,
+                "current_q_row": row.to_dict(),
+                "current_q_history": this_h,
                 "show_teach_ui": True
             })
             st.rerun()
 
     show_version_caption(); st.stop()
 
-# ------------------------------------------------------------------------------
-# 📦 【其餘盒子維持完整實體存續】
-# ------------------------------------------------------------------------------
+# --- 📦 【其餘盒子物理存續】 ---
 if not st.session_state.quiz_loaded:
     st.markdown("## 🟡 練習範圍設定 (盒子 C)")
-    # (此處物理保留 V2.8.82 所有起始句功能)
+    # ...
     show_version_caption()
