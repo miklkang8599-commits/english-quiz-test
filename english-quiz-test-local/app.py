@@ -1,7 +1,7 @@
 # ==============================================================================
-# 🧩 英文全能練習系統 (V2.9.00 - 任務帶入篩選版)
+# 🧩 英文全能練習系統 (V2.9.02 - 朗讀 Claude 評分版)
 # ==============================================================================
-# 📌 版本編號 (VERSION): 2.9.00
+# 📌 版本編號 (VERSION): 2.9.02
 # 📅 更新日期: 2026-03-14
 # 🛠️ 修復重點：
 #    1. [核心] set_page_config 移至最頂部，避免潛在初始化錯誤。
@@ -19,10 +19,11 @@ import streamlit as st
 import pandas as pd
 import random
 import re
+import requests
 from datetime import datetime, timedelta
 from streamlit_gsheets import GSheetsConnection
 
-VERSION = "2.9.00"
+VERSION = "2.9.02"
 
 # ==============================================================================
 # ✅ 修復 1：set_page_config 必須是第一個 Streamlit 呼叫
@@ -64,12 +65,16 @@ conn = st.connection("gsheets", type=GSheetsConnection)
 @st.cache_data(ttl=60)
 def load_static_data():
     try:
-        df_q = conn.read(worksheet="questions").fillna("").astype(str).replace(r'\.0$', '', regex=True)
-        df_s = conn.read(worksheet="students").fillna("").astype(str).replace(r'\.0$', '', regex=True)
-        return df_q, df_s
+        df_q  = conn.read(worksheet="questions").fillna("").astype(str).replace(r'\.0$', '', regex=True)
+        df_s  = conn.read(worksheet="students").fillna("").astype(str).replace(r'\.0$', '', regex=True)
+        try:
+            df_r = conn.read(worksheet="reading").fillna("").astype(str).replace(r'\.0$', '', regex=True)
+        except:
+            df_r = pd.DataFrame()
+        return df_q, df_s, df_r
     except Exception as e:
         st.error(f"靜態資料載入失敗: {e}")
-        return None, None
+        return None, None, pd.DataFrame()
 
 # ==============================================================================
 # ✅ 修復 5：load_dynamic_data 加上快取，避免每次 rerun 都重新讀取
@@ -105,7 +110,7 @@ def append_to_sheet(worksheet_name: str, new_row: pd.DataFrame):
 # 🔐 【權限控管與登入】
 # ------------------------------------------------------------------------------
 if not st.session_state.get('logged_in', False):
-    df_q, df_s = load_static_data()
+    df_q, df_s, df_r = load_static_data()
     _, c, _ = st.columns([1, 1.2, 1])
     with c:
         st.markdown("### 🔵 系統登入")
@@ -138,7 +143,7 @@ if not st.session_state.get('logged_in', False):
     st.stop()
 
 # 載入資料（登入後）
-df_q, df_s = load_static_data()
+df_q, df_s, df_r = load_static_data()
 df_a, df_l = load_dynamic_data()
 
 # ==============================================================================
@@ -856,17 +861,96 @@ if not st.session_state.quiz_loaded:
 if st.session_state.quiz_loaded:
     st.markdown(f"### 🔴 練習中 (第 {st.session_state.q_idx + 1} / {len(st.session_state.quiz_list)} 題)")
     q = st.session_state.quiz_list[st.session_state.q_idx]
-    is_mcq = "單選" in q.get("單元", "")
+    is_mcq     = "單選" in q.get("單元", "")
+    is_reading = "朗讀" in q.get("單元", "")
 
     # 題目標題
-    title_key = "單選題目" if is_mcq else "重組中文題目"
-    st.markdown(f"#### 題目：{q.get(title_key) or q.get('中文題目') or '【無資料】'}")
+    if is_reading:
+        st.markdown("#### 🎤 請朗讀以下英文句子：")
+        read_text = str(q.get("朗讀句子") or q.get("英文句子") or q.get("英文答案") or "").strip()
+        st.markdown(
+            f"<div style='font-size:1.5rem; font-weight:600; padding:16px; "
+            f"background:var(--color-background-secondary); border-radius:8px; "
+            f"letter-spacing:0.03em;'>{read_text}</div>",
+            unsafe_allow_html=True
+        )
+        st.write("")
 
-    # 正確答案
-    ans_col = "單選答案" if is_mcq else "重組英文答案"
-    ans_key = str(q.get(ans_col) or q.get("英文答案") or "").strip()
+        audio_data = st.audio_input("🎙️ 點擊錄音", key=f"audio_{st.session_state.q_idx}")
 
-    if is_mcq:
+        if audio_data and not st.session_state.get('show_analysis'):
+            if st.button("✅ 送出評分", type="primary", use_container_width=True):
+                with st.spinner("🔄 評分中，請稍候..."):
+                    try:
+                        import openai
+                        openai.api_key = st.secrets["OPENAI_API_KEY"]
+
+                        # Step 1：Whisper STT
+                        audio_data.seek(0)
+                        transcript = openai.audio.transcriptions.create(
+                            model="whisper-1",
+                            file=("audio.wav", audio_data, "audio/wav"),
+                            language="en"
+                        )
+                        stt_text = transcript.text.strip()
+
+                        # Step 2：Claude 評分（只回傳 0-100 整數）
+                        score_resp = requests.post(
+                            "https://api.anthropic.com/v1/messages",
+                            headers={"Content-Type": "application/json"},
+                            json={
+                                "model": "claude-sonnet-4-20250514",
+                                "max_tokens": 10,
+                                "messages": [{
+                                    "role": "user",
+                                    "content": (
+                                        f"You are an English pronunciation and fluency evaluator for students.\n"
+                                        f"Standard sentence: \"{read_text}\"\n"
+                                        f"Student said (transcribed by Whisper): \"{stt_text}\"\n"
+                                        f"Score the student's reading from 0 to 100 based on accuracy and completeness. "
+                                        f"Reply with ONLY a single integer number, nothing else."
+                                    )
+                                }]
+                            }
+                        )
+                        score_raw = score_resp.json()['content'][0]['text'].strip()
+                        score = max(0, min(100, int(re.sub(r'[^0-9]', '', score_raw) or '0')))
+
+                        if score >= 90:
+                            result_display = f"✅ 優秀！{score} 分"
+                        elif score >= 70:
+                            result_display = f"🟡 不錯！{score} 分"
+                        elif score >= 50:
+                            result_display = f"🟠 需加強 {score} 分"
+                        else:
+                            result_display = f"❌ 請再試試 {score} 分"
+
+                        st.session_state.update({
+                            "current_res":   result_display,
+                            "show_analysis": True
+                        })
+
+                        # 寫入 Log
+                        log_data = pd.DataFrame([{
+                            "時間":    get_now().strftime("%Y-%m-%d %H:%M:%S"),
+                            "姓名":    st.session_state.user_name,
+                            "分組":    st.session_state.group_id,
+                            "題目ID":  q.get('題目ID', 'N/A'),
+                            "結果":    "🎤 朗讀",
+                            "學生答案": stt_text,
+                            "分數":    score
+                        }])
+                        append_to_sheet("logs", log_data)
+                        st.rerun()
+
+                    except Exception as e:
+                        st.error(f"❌ 評分失敗：{e}")
+
+    elif is_mcq:
+        # 題目標題
+        st.markdown(f"#### 題目：{q.get('單選題目') or q.get('中文題目') or '【無資料】'}")
+        ans_key = str(q.get("單選答案") or "").strip()
+
         # ==============================================================
         # ✅ 修復 3：單選題顯示選項文字
         # ==============================================================
@@ -891,6 +975,10 @@ if st.session_state.quiz_loaded:
                 append_to_sheet("logs", log_data)
                 st.rerun()
     else:
+        # 題目標題（重組題）
+        st.markdown(f"#### 題目：{q.get('重組中文題目') or q.get('中文題目') or '【無資料】'}")
+        ans_key = str(q.get("重組英文答案") or q.get("英文答案") or "").strip()
+
         # 重組題介面
         st.info(" ".join(st.session_state.ans) if st.session_state.ans else "請依序點選單字按鈕...")
 
