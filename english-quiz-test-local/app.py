@@ -1,7 +1,7 @@
 # ==============================================================================
-# 🧩 英文全能練習系統 (V2.9.10 - 朗讀介面修復版)
+# 🧩 英文全能練習系統 (V2.9.11 - GPT評分修復版)
 # ==============================================================================
-# 📌 版本編號 (VERSION): 2.9.10
+# 📌 版本編號 (VERSION): 2.9.11
 # 📅 更新日期: 2026-03-14
 # 🛠️ 修復重點：
 #    1. [核心] set_page_config 移至最頂部，避免潛在初始化錯誤。
@@ -23,7 +23,7 @@ import requests
 from datetime import datetime, timedelta
 from streamlit_gsheets import GSheetsConnection
 
-VERSION = "2.9.10"
+VERSION = "2.9.11"
 
 # ==============================================================================
 # ✅ 修復 1：set_page_config 必須是第一個 Streamlit 呼叫
@@ -1032,26 +1032,23 @@ if st.session_state.quiz_loaded:
                         )
                         stt_text = transcript.text.strip()
 
-                        # Step 2：Claude 評分（只回傳 0-100 整數）
-                        score_resp = requests.post(
-                            "https://api.anthropic.com/v1/messages",
-                            headers={"Content-Type": "application/json"},
-                            json={
-                                "model": "claude-sonnet-4-20250514",
-                                "max_tokens": 10,
-                                "messages": [{
-                                    "role": "user",
-                                    "content": (
-                                        f"You are an English pronunciation and fluency evaluator for students.\n"
-                                        f"Standard sentence: \"{read_text}\"\n"
-                                        f"Student said (transcribed by Whisper): \"{stt_text}\"\n"
-                                        f"Score the student's reading from 0 to 100 based on accuracy and completeness. "
-                                        f"Reply with ONLY a single integer number, nothing else."
-                                    )
-                                }]
-                            }
+                        # Step 2：GPT-4o-mini 評分（只回傳 0-100 整數）
+                        client = openai.OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
+                        score_resp = client.chat.completions.create(
+                            model="gpt-4o-mini",
+                            max_tokens=10,
+                            messages=[{
+                                "role": "user",
+                                "content": (
+                                    f"You are an English pronunciation evaluator for students.\n"
+                                    f"Standard sentence: \"{read_text}\"\n"
+                                    f"Student said (transcribed): \"{stt_text}\"\n"
+                                    f"Score accuracy and completeness from 0 to 100. "
+                                    f"Reply with ONLY a single integer, nothing else."
+                                )
+                            }]
                         )
-                        score_raw = score_resp.json()['content'][0]['text'].strip()
+                        score_raw = score_resp.choices[0].message.content.strip()
                         score = max(0, min(100, int(re.sub(r'[^0-9]', '', score_raw) or '0')))
 
                         if score >= 90:
