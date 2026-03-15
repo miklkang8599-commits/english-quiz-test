@@ -1,7 +1,7 @@
 # ==============================================================================
-# 🧩 英文全能練習系統 (V2.9.06 - 任務題型選填版)
+# 🧩 英文全能練習系統 (V2.9.08 - 重組朗讀並列版)
 # ==============================================================================
-# 📌 版本編號 (VERSION): 2.9.06
+# 📌 版本編號 (VERSION): 2.9.08
 # 📅 更新日期: 2026-03-14
 # 🛠️ 修復重點：
 #    1. [核心] set_page_config 移至最頂部，避免潛在初始化錯誤。
@@ -23,7 +23,7 @@ import requests
 from datetime import datetime, timedelta
 from streamlit_gsheets import GSheetsConnection
 
-VERSION = "2.9.06"
+VERSION = "2.9.08"
 
 # ==============================================================================
 # ✅ 修復 1：set_page_config 必須是第一個 Streamlit 呼叫
@@ -881,86 +881,117 @@ if not st.session_state.quiz_loaded:
         except:
             return fallback
 
-    with st.expander("⚙️ 篩選題目範圍", expanded=not st.session_state.range_confirmed):
-        c_s = st.columns(5)
-        sv_opts = sorted(df_q['版本'].unique())
-        sv = c_s[0].selectbox("版本", sv_opts, index=_idx(sv_opts, 's_v'), key="s_v")
+    col_q, col_r = st.columns(2)
 
-        su_opts = sorted(df_q[df_q['版本'] == sv]['單元'].unique())
-        su = c_s[1].selectbox("單元", su_opts, index=_idx(su_opts, 's_u'), key="s_u")
+    # ══════════════════════════════════════════════════════════════════════
+    # 左欄：重組／單選
+    # ══════════════════════════════════════════════════════════════════════
+    with col_q:
+        st.markdown("### 📝 重組／單選")
 
-        sy_opts = sorted(df_q[(df_q['版本'] == sv) & (df_q['單元'] == su)]['年度'].unique())
-        sy = c_s[2].selectbox("年度", sy_opts, index=_idx(sy_opts, 's_y'), key="s_y")
+        with st.expander("⚙️ 篩選題目範圍", expanded=not st.session_state.range_confirmed):
+            sv_opts = sorted(df_q['版本'].unique())
+            sv = st.selectbox("版本", sv_opts, index=_idx(sv_opts, 's_v'), key="s_v")
+            su_opts = sorted(df_q[df_q['版本'] == sv]['單元'].unique())
+            su = st.selectbox("單元", su_opts, index=_idx(su_opts, 's_u'), key="s_u")
+            sy_opts = sorted(df_q[(df_q['版本'] == sv) & (df_q['單元'] == su)]['年度'].unique())
+            sy = st.selectbox("年度", sy_opts, index=_idx(sy_opts, 's_y'), key="s_y")
+            sb_opts = sorted(df_q[(df_q['版本'] == sv) & (df_q['單元'] == su) & (df_q['年度'] == sy)]['冊編號'].unique())
+            sb = st.selectbox("冊別", sb_opts, index=_idx(sb_opts, 's_b'), key="s_b")
+            sl_opts = sorted(df_q[(df_q['版本'] == sv) & (df_q['單元'] == su) & (df_q['年度'] == sy) & (df_q['冊編號'] == sb)]['課編號'].unique())
+            sl = st.selectbox("課次", sl_opts, index=_idx(sl_opts, 's_l'), key="s_l")
 
-        sb_opts = sorted(df_q[(df_q['版本'] == sv) & (df_q['單元'] == su) & (df_q['年度'] == sy)]['冊編號'].unique())
-        sb = c_s[3].selectbox("冊別", sb_opts, index=_idx(sb_opts, 's_b'), key="s_b")
-
-        sl_opts = sorted(df_q[(df_q['版本'] == sv) & (df_q['單元'] == su) & (df_q['年度'] == sy) & (df_q['冊編號'] == sb)]['課編號'].unique())
-        sl = c_s[4].selectbox("課次", sl_opts, index=_idx(sl_opts, 's_l'), key="s_l")
-
-        if st.button("🔍 確認範圍", use_container_width=True):
-            st.session_state.range_confirmed = True
-            st.session_state.pop('task_q_ids', None)  # 確認後清除任務限制，允許自由練習
-            st.rerun()
-
-    if st.session_state.range_confirmed:
-        df_scope = df_q[
-            (df_q['版本'] == st.session_state.s_v) &
-            (df_q['單元'] == st.session_state.s_u) &
-            (df_q['年度'] == st.session_state.s_y) &
-            (df_q['冊編號'] == st.session_state.s_b) &
-            (df_q['課編號'] == st.session_state.s_l)
-        ].copy()
-        df_scope['題目ID'] = df_scope.apply(
-            lambda r: f"{r['版本']}_{r['年度']}_{r['冊編號']}_{r['單元']}_{r['課編號']}_{r['句編號']}", axis=1
-        )
-
-        # 若從任務進來，限制在任務題目範圍內，並顯示提示
-        task_q_ids = st.session_state.get('task_q_ids', None)
-        if task_q_ids:
-            df_scope = df_scope[df_scope['題目ID'].isin(task_q_ids)].copy()
-            st.info(f"📋 任務模式：此範圍已限定為任務題目（共 {len(df_scope)} 題）")
-
-        st.markdown("---")
-        q_mode = st.radio("🎯 模式選擇：", ["1. 起始句開始", "2. 未練習", "3. 錯題復習"], horizontal=True)
-
-        cc1, cc2 = st.columns(2)
-        all_sentences = sorted(df_scope['句編號'].unique(), key=lambda x: int(x) if str(x).isdigit() else 0)
-        start_q = cc1.selectbox("🔢 指定起始句編號", all_sentences)
-        nu_i = cc2.number_input("🔢 練習題目數量", 1, 100, 10)
-
-        if "1. 起始句" in q_mode:
-            df_scope['_num'] = pd.to_numeric(df_scope['句編號'], errors='coerce').fillna(0)
-            df_final = df_scope[df_scope['_num'] >= int(start_q)].sort_values('_num').copy()
-        elif "2. 未練習" in q_mode:
-            done_ids = df_l[df_l['姓名'] == st.session_state.user_name]['題目ID'].unique() if not df_l.empty else []
-            df_final = df_scope[~df_scope['題目ID'].isin(done_ids)].copy()
-        else:
-            if not df_l.empty:
-                wrong_ids = df_l[
-                    (df_l['姓名'] == st.session_state.user_name) &
-                    (df_l['結果'].str.contains('❌', na=False))
-                ]['題目ID'].unique()
-            else:
-                wrong_ids = []
-            df_final = df_scope[df_scope['題目ID'].isin(wrong_ids)].copy()
-
-        st.success(f"📊 目前範圍內共有 {len(df_final)} 題符合條件")
-
-        if st.button("🚀 正式開始練習", type="primary", use_container_width=True):
-            if not df_final.empty:
-                st.session_state.update({
-                    "quiz_list": df_final.head(int(nu_i)).to_dict('records'),
-                    "q_idx": 0,
-                    "quiz_loaded": True,
-                    "ans": [],
-                    "used_history": [],
-                    "shuf": [],
-                    "show_analysis": False
-                })
+            if st.button("🔍 確認範圍", use_container_width=True):
+                st.session_state.range_confirmed = True
+                st.session_state.pop('task_q_ids', None)
                 st.rerun()
+
+        if st.session_state.range_confirmed:
+            df_scope = df_q[
+                (df_q['版本'] == st.session_state.s_v) &
+                (df_q['單元'] == st.session_state.s_u) &
+                (df_q['年度'] == st.session_state.s_y) &
+                (df_q['冊編號'] == st.session_state.s_b) &
+                (df_q['課編號'] == st.session_state.s_l)
+            ].copy()
+            df_scope['題目ID'] = df_scope.apply(
+                lambda r: f"{r['版本']}_{r['年度']}_{r['冊編號']}_{r['單元']}_{r['課編號']}_{r['句編號']}", axis=1
+            )
+
+            task_q_ids = st.session_state.get('task_q_ids', None)
+            if task_q_ids:
+                df_scope = df_scope[df_scope['題目ID'].isin(task_q_ids)].copy()
+                st.info(f"📋 任務模式（共 {len(df_scope)} 題）")
+
+            q_mode = st.radio("🎯 模式：", ["1. 起始句", "2. 未練習", "3. 錯題"], horizontal=True, key="q_mode")
+            all_sentences = sorted(df_scope['句編號'].unique(), key=lambda x: int(x) if str(x).isdigit() else 0)
+            start_q = st.selectbox("起始句編號", all_sentences, key="q_start")
+            nu_i    = st.number_input("題目數量", 1, 100, 10, key="q_nu")
+
+            if "1." in q_mode:
+                df_scope['_num'] = pd.to_numeric(df_scope['句編號'], errors='coerce').fillna(0)
+                df_final = df_scope[df_scope['_num'] >= int(start_q)].sort_values('_num').copy()
+            elif "2." in q_mode:
+                done_ids = df_l[df_l['姓名'] == st.session_state.user_name]['題目ID'].unique() if not df_l.empty else []
+                df_final = df_scope[~df_scope['題目ID'].isin(done_ids)].copy()
             else:
-                st.error("❌ 此範圍內無符合題目，請重新選擇！")
+                wrong_ids = df_l[(df_l['姓名'] == st.session_state.user_name) & (df_l['結果'].str.contains('❌', na=False))]['題目ID'].unique() if not df_l.empty else []
+                df_final  = df_scope[df_scope['題目ID'].isin(wrong_ids)].copy()
+
+            st.caption(f"共 {len(df_final)} 題符合條件")
+
+            if st.button("🚀 開始練習", type="primary", use_container_width=True):
+                if not df_final.empty:
+                    st.session_state.update({
+                        "quiz_list": df_final.head(int(nu_i)).to_dict('records'),
+                        "q_idx": 0, "quiz_loaded": True,
+                        "ans": [], "used_history": [], "shuf": [], "show_analysis": False
+                    })
+                    st.rerun()
+                else:
+                    st.error("❌ 無符合題目，請重新選擇")
+
+    # ══════════════════════════════════════════════════════════════════════
+    # 右欄：朗讀
+    # ══════════════════════════════════════════════════════════════════════
+    with col_r:
+        st.markdown("### 🎤 朗讀")
+
+        if df_r.empty:
+            st.info("朗讀題庫尚無資料。")
+        else:
+            df_r2 = df_r.copy()
+            if '題目ID' not in df_r2.columns:
+                df_r2['題目ID'] = df_r2.apply(
+                    lambda r: f"R_{r.get('版本','')}_{r.get('年度','')}_{r.get('冊編號','')}_{r.get('單元','')}_{r.get('課編號','')}_{r.get('句編號','')}", axis=1
+                )
+            df_r2['單元'] = df_r2.get('單元', pd.Series('朗讀', index=df_r2.index)).fillna('朗讀')
+
+            with st.expander("⚙️ 篩選朗讀範圍", expanded=True):
+                rr_v = st.selectbox("版本", sorted(df_r2['版本'].unique()), key="r_v")
+                rr_u_src = df_r2[df_r2['版本'] == rr_v]
+                rr_u = st.selectbox("單元", sorted(rr_u_src['單元'].unique()), key="r_u")
+                rr_y_src = rr_u_src[rr_u_src['單元'] == rr_u]
+                rr_y = st.selectbox("年度", sorted(rr_y_src['年度'].unique()), key="r_y")
+                rr_b_src = rr_y_src[rr_y_src['年度'] == rr_y]
+                rr_b = st.selectbox("冊別", sorted(rr_b_src['冊編號'].unique()), key="r_b")
+                rr_l_src = rr_b_src[rr_b_src['冊編號'] == rr_b]
+                rr_l = st.selectbox("課次", sorted(rr_l_src['課編號'].unique()), key="r_l")
+
+            df_r_scope = rr_l_src[rr_l_src['課編號'] == rr_l].copy()
+            rnu_i = st.number_input("題目數量", 1, max(len(df_r_scope), 1), min(10, max(len(df_r_scope), 1)), key="r_nu")
+            st.caption(f"共 {len(df_r_scope)} 題")
+
+            if st.button("🎤 開始朗讀練習", type="primary", use_container_width=True):
+                if not df_r_scope.empty:
+                    st.session_state.update({
+                        "quiz_list": df_r_scope.head(int(rnu_i)).to_dict('records'),
+                        "q_idx": 0, "quiz_loaded": True,
+                        "ans": [], "used_history": [], "shuf": [], "show_analysis": False
+                    })
+                    st.rerun()
+                else:
+                    st.error("❌ 無朗讀題目，請重新選擇")
 
     show_version_caption()
 
