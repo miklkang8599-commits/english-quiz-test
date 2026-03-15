@@ -1,7 +1,7 @@
 # ==============================================================================
-# 🧩 英文全能練習系統 (V2.9.08 - 重組朗讀並列版)
+# 🧩 英文全能練習系統 (V2.9.09 - Tab切換手機友善版)
 # ==============================================================================
-# 📌 版本編號 (VERSION): 2.9.08
+# 📌 版本編號 (VERSION): 2.9.09
 # 📅 更新日期: 2026-03-14
 # 🛠️ 修復重點：
 #    1. [核心] set_page_config 移至最頂部，避免潛在初始化錯誤。
@@ -23,7 +23,7 @@ import requests
 from datetime import datetime, timedelta
 from streamlit_gsheets import GSheetsConnection
 
-VERSION = "2.9.08"
+VERSION = "2.9.09"
 
 # ==============================================================================
 # ✅ 修復 1：set_page_config 必須是第一個 Streamlit 呼叫
@@ -881,14 +881,10 @@ if not st.session_state.quiz_loaded:
         except:
             return fallback
 
-    col_q, col_r = st.columns(2)
+    tab_q, tab_r = st.tabs(["📝 重組／單選", "🎤 朗讀"])
 
-    # ══════════════════════════════════════════════════════════════════════
-    # 左欄：重組／單選
-    # ══════════════════════════════════════════════════════════════════════
-    with col_q:
-        st.markdown("### 📝 重組／單選")
-
+    # ── Tab：重組／單選 ───────────────────────────────────────────────────
+    with tab_q:
         with st.expander("⚙️ 篩選題目範圍", expanded=not st.session_state.range_confirmed):
             sv_opts = sorted(df_q['版本'].unique())
             sv = st.selectbox("版本", sv_opts, index=_idx(sv_opts, 's_v'), key="s_v")
@@ -951,12 +947,8 @@ if not st.session_state.quiz_loaded:
                 else:
                     st.error("❌ 無符合題目，請重新選擇")
 
-    # ══════════════════════════════════════════════════════════════════════
-    # 右欄：朗讀
-    # ══════════════════════════════════════════════════════════════════════
-    with col_r:
-        st.markdown("### 🎤 朗讀")
-
+    # ── Tab：朗讀 ─────────────────────────────────────────────────────────
+    with tab_r:
         if df_r.empty:
             st.info("朗讀題庫尚無資料。")
         else:
@@ -965,7 +957,7 @@ if not st.session_state.quiz_loaded:
                 df_r2['題目ID'] = df_r2.apply(
                     lambda r: f"R_{r.get('版本','')}_{r.get('年度','')}_{r.get('冊編號','')}_{r.get('單元','')}_{r.get('課編號','')}_{r.get('句編號','')}", axis=1
                 )
-            df_r2['單元'] = df_r2.get('單元', pd.Series('朗讀', index=df_r2.index)).fillna('朗讀')
+            df_r2['單元'] = df_r2['單元'].fillna('朗讀') if '單元' in df_r2.columns else '朗讀'
 
             with st.expander("⚙️ 篩選朗讀範圍", expanded=True):
                 rr_v = st.selectbox("版本", sorted(df_r2['版本'].unique()), key="r_v")
