@@ -1,7 +1,7 @@
 # ==============================================================================
-# 🧩 英文全能練習系統 (V2.9.09 - Tab切換手機友善版)
+# 🧩 英文全能練習系統 (V2.9.10 - 朗讀介面修復版)
 # ==============================================================================
-# 📌 版本編號 (VERSION): 2.9.09
+# 📌 版本編號 (VERSION): 2.9.10
 # 📅 更新日期: 2026-03-14
 # 🛠️ 修復重點：
 #    1. [核心] set_page_config 移至最頂部，避免潛在初始化錯誤。
@@ -23,7 +23,7 @@ import requests
 from datetime import datetime, timedelta
 from streamlit_gsheets import GSheetsConnection
 
-VERSION = "2.9.09"
+VERSION = "2.9.10"
 
 # ==============================================================================
 # ✅ 修復 1：set_page_config 必須是第一個 Streamlit 呼叫
@@ -815,24 +815,24 @@ if not st.session_state.quiz_loaded:
                         pending_ids = q_ids_set - my_done
 
                         if is_reading_task:
-                            # 純朗讀：從 df_r 取題目直接載入
                             df_r2 = df_r.copy()
                             if '題目ID' not in df_r2.columns:
                                 df_r2['題目ID'] = df_r2.apply(
                                     lambda r: f"R_{r.get('版本','')}_{r.get('年度','')}_{r.get('冊編號','')}_{r.get('單元','')}_{r.get('課編號','')}_{r.get('句編號','')}", axis=1
                                 )
-                            df_r2['單元'] = df_r2.get('單元', '朗讀')
                             pending = df_r2[df_r2['題目ID'].isin(pending_ids)].copy()
                             if not pending.empty:
+                                records = pending.to_dict('records')
+                                for r in records:
+                                    r['_type'] = 'reading'
                                 st.session_state.update({
-                                    "quiz_list": pending.to_dict('records'),
+                                    "quiz_list": records,
                                     "q_idx": 0, "quiz_loaded": True,
                                     "ans": [], "used_history": [], "shuf": [], "show_analysis": False
                                 })
                                 st.rerun()
 
                         elif is_mixed_task:
-                            # 混合：一般題 from df_q + 朗讀題 from df_r，合併後直接載入
                             df_q2 = df_q.copy()
                             df_q2['題目ID'] = df_q2.apply(
                                 lambda r: f"{r['版本']}_{r['年度']}_{r['冊編號']}_{r['單元']}_{r['課編號']}_{r['句編號']}", axis=1
@@ -842,10 +842,13 @@ if not st.session_state.quiz_loaded:
                                 df_r2['題目ID'] = df_r2.apply(
                                     lambda r: f"R_{r.get('版本','')}_{r.get('年度','')}_{r.get('冊編號','')}_{r.get('單元','')}_{r.get('課編號','')}_{r.get('句編號','')}", axis=1
                                 )
-                                df_r2['單元'] = '朗讀'
                             pending_q = df_q2[df_q2['題目ID'].isin(pending_ids)].copy()
                             pending_r = df_r2[df_r2['題目ID'].isin(pending_ids)].copy() if not df_r2.empty else pd.DataFrame()
-                            pending   = pd.concat([pending_q, pending_r], ignore_index=True)
+                            # 標記朗讀題
+                            if not pending_r.empty:
+                                pending_r = pending_r.copy()
+                                pending_r['_type'] = 'reading'
+                            pending = pd.concat([pending_q, pending_r], ignore_index=True)
                             if not pending.empty:
                                 st.session_state.update({
                                     "quiz_list": pending.to_dict('records'),
@@ -976,8 +979,11 @@ if not st.session_state.quiz_loaded:
 
             if st.button("🎤 開始朗讀練習", type="primary", use_container_width=True):
                 if not df_r_scope.empty:
+                    records = df_r_scope.head(int(rnu_i)).to_dict('records')
+                    for r in records:
+                        r['_type'] = 'reading'
                     st.session_state.update({
-                        "quiz_list": df_r_scope.head(int(rnu_i)).to_dict('records'),
+                        "quiz_list": records,
                         "q_idx": 0, "quiz_loaded": True,
                         "ans": [], "used_history": [], "shuf": [], "show_analysis": False
                     })
@@ -994,7 +1000,7 @@ if st.session_state.quiz_loaded:
     st.markdown(f"### 🔴 練習中 (第 {st.session_state.q_idx + 1} / {len(st.session_state.quiz_list)} 題)")
     q = st.session_state.quiz_list[st.session_state.q_idx]
     is_mcq     = "單選" in q.get("單元", "")
-    is_reading = "朗讀" in q.get("單元", "")
+    is_reading = q.get("_type") == "reading" or "朗讀" in q.get("單元", "")
 
     # 題目標題
     if is_reading:
